@@ -4,6 +4,7 @@ from torch import nn
 import torchvision
 from torchvision import transforms
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt  # 新增：用于绘图
 
 # ==========================================
 # 替代 d2l 的辅助函数与类
@@ -99,12 +100,10 @@ def evaluate_accuracy_gpu(net, data_iter, device=None):
         net.eval()  # 设置为评估模式
         if not device:
             device = next(iter(net.parameters())).device
-    # 正确预测的数量，总预测的数量
     metric = Accumulator(2)
     with torch.no_grad():
         for X, y in data_iter:
             if isinstance(X, list):
-                # BERT微调所需的
                 X = [x.to(device) for x in X]
             else:
                 X = X.to(device)
@@ -114,7 +113,7 @@ def evaluate_accuracy_gpu(net, data_iter, device=None):
 
 
 def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
-    """用GPU训练模型"""
+    """用GPU训练模型，并在结束后绘制指标趋势图"""
     def init_weights(m):
         if type(m) == nn.Linear or type(m) == nn.Conv2d:
             nn.init.xavier_uniform_(m.weight)
@@ -125,8 +124,13 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
     loss = nn.CrossEntropyLoss()
     
     timer, num_batches = Timer(), len(train_iter)
+    
+    # 新增：用于记录绘图数据的列表
+    history_train_l = []
+    history_train_acc = []
+    history_test_acc = []
+    
     for epoch in range(num_epochs):
-        # 训练损失之和，训练准确率之和，样本数
         metric = Accumulator(3)
         net.train()
         for i, (X, y) in enumerate(train_iter):
@@ -140,16 +144,44 @@ def train_ch6(net, train_iter, test_iter, num_epochs, lr, device):
             with torch.no_grad():
                 metric.add(l * X.shape[0], accuracy(y_hat, y), X.shape[0])
             timer.stop()
-            train_l = metric[0] / metric[2]
-            train_acc = metric[1] / metric[2]
             
+        train_l = metric[0] / metric[2]
+        train_acc = metric[1] / metric[2]
         test_acc = evaluate_accuracy_gpu(net, test_iter)
-        # 替代 Animator，直接在控制台输出每个 epoch 的指标
+        
+        # 新增：将当前 epoch 的指标追加到列表中
+        history_train_l.append(train_l)
+        history_train_acc.append(train_acc)
+        history_test_acc.append(test_acc)
+        
         print(f'epoch {epoch + 1}, loss {train_l:.3f}, train acc {train_acc:.3f}, test acc {test_acc:.3f}')
         
     print(f'Final: loss {train_l:.3f}, train acc {train_acc:.3f}, test acc {test_acc:.3f}')
     print(f'{metric[2] * num_epochs / timer.sum():.1f} examples/sec on {str(device)}')
     
+    # ==========================================
+    # 新增：使用 Matplotlib 绘制训练和测试指标
+    # ==========================================
+    epochs = range(1, num_epochs + 1)
+    plt.figure(figsize=(8, 5))
+    
+    # 绘制三条曲线
+    plt.plot(epochs, history_train_l, label='train loss', color='blue', linestyle='dashed', marker='o')
+    plt.plot(epochs, history_train_acc, label='train acc', color='red', marker='s')
+    plt.plot(epochs, history_test_acc, label='test acc', color='green', marker='^')
+    
+    # 设置图表属性
+    plt.xlabel('Epochs')
+    plt.ylabel('Metrics')
+    plt.title('Training Loss and Accuracy')
+    plt.ylim(0, 1.1)  # 根据通常的准确率和 Loss 范围，可以锁定 y 轴视图
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.legend()
+    
+    # 显示图表
+    plt.show()
 
-lr, num_epochs = 0.9, 10
-train_ch6(net, train_iter, test_iter, num_epochs, lr, try_gpu())
+if __name__ == '__main__':
+    
+    lr, num_epochs = 0.9, 10
+    train_ch6(net, train_iter, test_iter, num_epochs, lr, try_gpu())
